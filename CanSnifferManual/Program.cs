@@ -21,6 +21,16 @@ public class Message
         }
         return value;
     }
+
+    // Новый метод для получения значения пары байт
+    public ushort GetBytePairValue(int index1, int index2)
+    {
+        if (index1 < 0 || index1 >= Data.Length || index2 < 0 || index2 >= Data.Length)
+        {
+            throw new ArgumentOutOfRangeException("Index out of range");
+        }
+        return (ushort)((Data[index1] << 8) | Data[index2]);
+    }
 }
 
 class CANMessageLogger
@@ -180,6 +190,7 @@ class CANMessageLogger
         return dict;
     }
 
+    // Обновленный метод для сравнения по парам байт
     static void UpdateSuccessBuffer(bool isIncrease)
     {
         lock (bufferLock)
@@ -193,11 +204,21 @@ class CANMessageLogger
                 uint id = kvp.Key;
                 if (successLatest.ContainsKey(id))
                 {
-                    ulong currentValue = kvp.Value.GetDataValue();
-                    ulong successValue = successLatest[id].GetDataValue();
-                    if ((isIncrease && currentValue > successValue) || (!isIncrease && currentValue < successValue))
+                    Message currentMsg = kvp.Value;
+                    Message successMsg = successLatest[id];
+
+                    // Проверяем все последовательные пары байт
+                    for (int i = 0; i < currentMsg.Data.Length - 1; i++)
                     {
-                        successBuffer.Add(kvp.Value);
+                        ushort currentPairValue = currentMsg.GetBytePairValue(i, i + 1);
+                        ushort successPairValue = successMsg.GetBytePairValue(i, i + 1);
+
+                        if ((isIncrease && currentPairValue > successPairValue) || (!isIncrease && currentPairValue < successPairValue))
+                        {
+                            successBuffer.Add(currentMsg);
+                            Console.WriteLine($"Найдена пара байт {i} и {i + 1} для ID {id:X}: Предыдущее = {successPairValue}, Текущее = {currentPairValue}");
+                            break; // Выходим после нахождения первой подходящей пары
+                        }
                     }
                 }
             }
