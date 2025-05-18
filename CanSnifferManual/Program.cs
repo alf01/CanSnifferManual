@@ -31,6 +31,7 @@ public class Message
         }
         return (ushort)((Data[index1] << 8) | Data[index2]);
     }
+
 }
 
 class CANMessageLogger
