@@ -22,7 +22,6 @@ public class Message
         return value;
     }
 
-    // Новый метод для получения значения пары байт
     public ushort GetBytePairValue(int index1, int index2)
     {
         if (index1 < 0 || index1 >= Data.Length || index2 < 0 || index2 >= Data.Length)
@@ -31,7 +30,14 @@ public class Message
         }
         return (ushort)((Data[index1] << 8) | Data[index2]);
     }
+}
 
+public class Parameter
+{
+    public string Address { get; set; }
+    public int[] ByteIndices { get; set; }
+    public double Coefficient { get; set; }
+    public string Name { get; set; }
 }
 
 class CANMessageLogger
@@ -39,15 +45,21 @@ class CANMessageLogger
     private static readonly object bufferLock = new object();
     private static List<Message> currentBuffer = new List<Message>();
     private static List<Message> successBuffer = new List<Message>();
-    // Список целевых адресов в шестнадцатеричном формате
     static List<string> targetAddresses = new List<string> { "136", "13A", "17C", "1DC" };
-    // Словарь для хранения последних данных по адресам
     static Dictionary<string, string> lastMessages = new Dictionary<string, string>();
+    static Dictionary<string, string> lastParameterValues = new Dictionary<string, string>();
+
+    static List<Parameter> parameters = new List<Parameter>
+    {
+        new Parameter { Address = "17C", ByteIndices = new[] { 2, 3 }, Coefficient = 1, Name = "RPM" }
+        // Добавьте другие параметры здесь, например:
+        // new Parameter { Address = "1A0", ByteIndices = new[] { 0, 1 }, Coefficient = 0.1, Name = "Давление" }
+    };
 
     static async Task Main(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        string portName = "COM11"; // Замените на ваш COM-порт
+        string portName = "COM11";
         int baudRate = 115200;
         string logFilename = $"can_log_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
 
@@ -68,7 +80,6 @@ class CANMessageLogger
             var cts = new CancellationTokenSource();
             var readingTask = Task.Run(() => ReadSerial(serialPort, logWriter, cts.Token));
 
-            // Запуск фонового потока для обновления консоли
             Thread updateThread = new Thread(UpdateConsole);
             updateThread.IsBackground = true;
             updateThread.Start();
@@ -104,10 +115,10 @@ class CANMessageLogger
                         break;
                     }
                 }
-                Thread.Sleep(100); // Избегаем активного ожидания
+                Thread.Sleep(100);
             }
 
-            await readingTask; // Ждем завершения задачи чтения
+            await readingTask;
         }
     }
 
@@ -119,7 +130,7 @@ class CANMessageLogger
             {
                 string line = serialPort.ReadLine();
                 logWriter.WriteLine(line);
-                logWriter.Flush(); // Убеждаемся, что данные записаны в файл
+                logWriter.Flush();
 
                 var message = ParseMessage(line);
                 if (message != null)
@@ -134,13 +145,33 @@ class CANMessageLogger
                         currentBuffer.Add(message);
                     }
 
-                    // Сохраняем данные для целевых адресов
                     string idHex = message.ID.ToString("X");
                     if (targetAddresses.Contains(idHex))
                     {
                         lock (lastMessages)
                         {
                             lastMessages[idHex] = string.Join(" ", message.Data.Select(b => b.ToString("D")));
+                        }
+                    }
+
+                    foreach (var param in parameters)
+                    {
+                        if (idHex == param.Address)
+                        {
+                            if (param.ByteIndices.All(i => i < message.Data.Length))
+                            {
+                                ulong value = 0;
+                                foreach (var index in param.ByteIndices)
+                                {
+                                    value = (value << 8) | message.Data[index];
+                                }
+                                double calculatedValue = value * param.Coefficient;
+                                lock (lastParameterValues)
+                                {
+                                    lastParameterValues[param.Name] = calculatedValue.ToString();
+                                }
+                                Console.WriteLine($"{param.Name}: {calculatedValue}   ");
+                            }
                         }
                     }
                 }
@@ -191,7 +222,6 @@ class CANMessageLogger
         return dict;
     }
 
-    // Обновленный метод для сравнения по парам байт
     static void UpdateSuccessBuffer(bool isIncrease)
     {
         lock (bufferLock)
@@ -208,7 +238,6 @@ class CANMessageLogger
                     Message currentMsg = kvp.Value;
                     Message successMsg = successLatest[id];
 
-                    // Проверяем все последовательные пары байт
                     for (int i = 0; i < currentMsg.Data.Length - 1; i++)
                     {
                         ushort currentPairValue = currentMsg.GetBytePairValue(i, i + 1);
@@ -218,7 +247,7 @@ class CANMessageLogger
                         {
                             successBuffer.Add(currentMsg);
                             Console.WriteLine($"Найдена пара байт {i} и {i + 1} для ID {id:X}: Предыдущее = {successPairValue}, Текущее = {currentPairValue}");
-                            break; // Выходим после нахождения первой подходящей пары
+                            break;
                         }
                     }
                 }
@@ -248,8 +277,7 @@ class CANMessageLogger
         {
             lock (lastMessages)
             {
-                // Устанавливаем курсор на последние 4 строки консоли
-                Console.SetCursorPosition(0, Console.WindowHeight - 4);
+                Console.SetCursorPosition(0, Console.WindowHeight - 4 - parameters.Count - 1);
                 foreach (var addr in targetAddresses)
                 {
                     if (lastMessages.TryGetValue(addr, out string data))
@@ -261,8 +289,21 @@ class CANMessageLogger
                         Console.WriteLine($"{addr}: Нет данных");
                     }
                 }
+
+                Console.WriteLine("\nПараметры:");
+                foreach (var param in parameters)
+                {
+                    if (lastParameterValues.TryGetValue(param.Name, out string value))
+                    {
+                        Console.WriteLine($"{param.Name}: {value}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"{param.Name}: Нет данных");
+                    }
+                }
             }
-            Thread.Sleep(1000); // Обновляем каждую секунду
+            Thread.Sleep(1000);
         }
     }
 }
