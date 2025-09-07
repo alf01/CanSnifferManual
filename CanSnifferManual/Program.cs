@@ -229,7 +229,6 @@ class CANMessageLogger
             var currentLatest = GetLatestPerId(currentBuffer);
             var successLatest = GetLatestPerId(successBuffer);
             successBuffer.Clear();
-
             foreach (var kvp in currentLatest)
             {
                 uint id = kvp.Key;
@@ -237,17 +236,24 @@ class CANMessageLogger
                 {
                     Message currentMsg = kvp.Value;
                     Message successMsg = successLatest[id];
-
+                    bool hasChanges = false;
+                    List<string> changeLogs = new List<string>();
                     for (int i = 0; i < currentMsg.Data.Length - 1; i++)
                     {
                         ushort currentPairValue = currentMsg.GetBytePairValue(i, i + 1);
                         ushort successPairValue = successMsg.GetBytePairValue(i, i + 1);
-
                         if ((isIncrease && currentPairValue > successPairValue) || (!isIncrease && currentPairValue < successPairValue))
                         {
-                            successBuffer.Add(currentMsg);
-                            Console.WriteLine($"Найдена пара байт {i} и {i + 1} для ID {id:X}: Предыдущее = {successPairValue}, Текущее = {currentPairValue}");
-                            break;
+                            hasChanges = true;
+                            changeLogs.Add($"Найдена пара байт {i} и {i + 1} для ID {id:X}: Предыдущее = {successPairValue}, Текущее = {currentPairValue}");
+                        }
+                    }
+                    if (hasChanges)
+                    {
+                        successBuffer.Add(currentMsg);
+                        foreach (var log in changeLogs)
+                        {
+                            Console.WriteLine(log);
                         }
                     }
                 }
